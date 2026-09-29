@@ -238,4 +238,4 @@ elif page == "Admin / Setup":
 
 elif page == "รูปภาพ":
     st.subheader("🖼️ รูปภาพ")
-    st.image(str(Path(__file__).parent / "images" / "Tae.png"), caption="Tae", width="stretch")
+    st.image(str(Path(__file__).parent / "images" / "Tae.png"))
