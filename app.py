@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -99,7 +100,7 @@ with st.sidebar:
     st.caption("Neo4j Aura + Streamlit")
     page = st.radio(
         "เมนู",
-        ["Dashboard", "Recommendations", "Book Search", "Borrow / Rate", "Graph Explorer", "Admin / Setup"],
+        ["Dashboard", "Recommendations", "Book Search", "Borrow / Rate", "Graph Explorer", "Admin / Setup", "รูปภาพ"],
     )
     st.divider()
     st.caption("Bachelor-level Graph Database Project")
@@ -234,3 +235,7 @@ elif page == "Admin / Setup":
             seed_demo_data()
         st.success("สร้างข้อมูลตัวอย่างเรียบร้อยแล้ว")
         st.rerun()
+
+elif page == "รูปภาพ":
+    st.subheader("🖼️ รูปภาพ")
+    st.image(str(Path(__file__).parent / "images" / "Tae.png"), caption="Tae", width="stretch")
