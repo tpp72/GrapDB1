@@ -1,56 +1,74 @@
-# GraphBook Recommendation System
+# Crypto Coin Recommender (Graph Database)
 
 โปรเจ็คตัวอย่างระดับปริญญาตรีสำหรับรายวิชา Graph Database / Advanced Database
 พัฒนาด้วย **Streamlit + Neo4j Aura + Cypher** และออกแบบให้ deploy ผ่าน **GitHub → Streamlit Community Cloud** ได้โดยตรง
 
+> โปรเจ็คนี้เป็นตัวอย่างเชิงวิชาการเรื่องโครงสร้าง Graph เท่านั้น ไม่ใช่คำแนะนำการลงทุน
+
 ## 1. แนวคิดของระบบ
+
+ผู้ใช้ถือเหรียญอะไร → หาผู้ใช้คนอื่นที่พอร์ตคล้ายกัน → ดูว่าคนเหล่านั้นถือเหรียญอะไรอีก → แนะนำเหรียญนั้นกลับมา
 
 ระบบใช้ Property Graph ดังนี้
 
 ```text
-(Student)-[:FRIEND_OF]-(Student)
-(Student)-[:BORROWED {borrow_date, rating}]->(Book)
-(Student)-[:INTERESTED_IN]->(Category)
-(Book)-[:IN_CATEGORY]->(Category)
-(Author)-[:WROTE]->(Book)
+(:User {name})-[:HOLDS]->(:Coin {symbol})
+(:Coin)-[:IN_CATEGORY]->(:Category {name})
+(:User)-[:FRIEND_OF {shared_coins, weight}]->(:User)
 ```
 
-จุดเด่นคือคำแนะนำอธิบายได้ (Explainable Recommendation) ว่าหนังสือถูกแนะนำเพราะ
-1. เพื่อนของผู้ใช้เคยยืม
-2. หมวดหนังสือตรงกับความสนใจ
-3. หนังสือได้รับความนิยม
-4. หนังสือมีคะแนนเฉลี่ยดี
+`FRIEND_OF` เป็นข้อมูลที่ **คำนวณจาก `HOLDS`** (ผู้ใช้ 2 คนถือเหรียญเดียวกันอย่างน้อย 1 เหรียญ)
+แอปจะสร้างใหม่ให้อัตโนมัติทุกครั้งที่ `HOLDS` เปลี่ยน จึงไม่มีหน้าจอให้แก้ `FRIEND_OF` โดยตรง
 
-ตัวอย่างคะแนน Hybrid:
+คำแนะนำมี 3 แบบ
 
-```text
-score = friend_count*3
-      + interest_matches*2
-      + popularity*0.20
-      + average_rating*0.50
-```
-
-สูตรนี้เป็น heuristic เพื่อการเรียนการสอน ไม่ใช่โมเดล ML ที่ผ่านการ optimize
+| แบบ | เส้นทางในกราฟ | คะแนน |
+|---|---|---|
+| 3 hop ผ่าน `HOLDS` | ผู้ใช้ → เหรียญที่ถือ → คนอื่นที่ถือเหมือนกัน → เหรียญใหม่ | จำนวนเส้นทางที่เดินไปถึง |
+| 2 hop ผ่าน `FRIEND_OF` | ผู้ใช้ → เพื่อน → เหรียญที่เพื่อนถือ | ผลรวม `weight` ของเพื่อน (เท่ากับแบบ 3 hop) |
+| ตามหมวดหมู่ | ผู้ใช้ → เหรียญที่ถือ → หมวดหมู่ → เหรียญอื่นในหมวด | จำนวนเส้นทาง ใช้แก้ปัญหา Cold Start |
 
 ## 2. โครงสร้างไฟล์
 
 ```text
-book_graph_recommender/
-├── app.py
-├── neo4j_service.py
+GrapDB1/
+├── app.py                  # หน้าจอ Streamlit
+├── neo4j_service.py        # ชั้นเชื่อมต่อฐานข้อมูลและ Cypher ทั้งหมด
 ├── requirements.txt
 ├── .gitignore
 ├── .streamlit/
-│   └── secrets.toml.example
-└── cypher/
-    └── schema.cypher
+│   ├── secrets.toml.example
+│   └── secrets.toml        # สร้างเองในเครื่อง ไม่ถูก commit
+├── cypher/
+│   ├── schema.cypher
+│   └── recommendation.cypher
+├── docs/
+│   └── PROJECT_GUIDE_TH.md
+└── homework/               # ไฟล์การบ้านที่แสดงบนการ์ด 01-03 ของหน้า Hub
+    ├── 01_club/
+    ├── 02_graph/
+    └── 03_neo4j/
 ```
+
+### หน้า Hub
+
+หน้าแรกของแอปเป็นหน้ารวมการบ้าน 4 การ์ด การ์ดที่ 4 คือระบบแนะนำเหรียญนี้ (เปิดตรงได้ด้วย `?view=app`)
+ส่วนการ์ด 01-03 สร้างปุ่มจากไฟล์ที่อยู่ในโฟลเดอร์ `homework/` ของแต่ละงาน
+
+| ไฟล์ในโฟลเดอร์ | ปุ่มที่ได้ |
+|---|---|
+| `.ipynb` | เปิดการบ้านใน Colab |
+| `.pdf` | ดาวน์โหลดเอกสาร PDF |
+| ไม่มีไฟล์ | ปุ่ม “ยังไม่มีไฟล์งาน” (กดไม่ได้) |
+
+ทุกการ์ดมีปุ่มดูไฟล์บน GitHub เสมอ ลิงก์ Colab และ GitHub จะใช้ได้หลัง push ไฟล์ขึ้น branch `main` แล้ว
+ชื่อการ์ด คำอธิบาย และชื่อเจ้าของงานแก้ได้ที่ `HUB_CARDS`, `OWNER_NAME` และ `OWNER_ID` ตอนต้นของ `app.py`
 
 ## 3. สร้าง Neo4j Aura
 
 1. สร้าง AuraDB instance
 2. เก็บค่า Connection URI, username และ password
-3. URI ของ Aura โดยทั่วไปอยู่ในรูป `neo4j+s://...databases.neo4j.io`
+3. URI ของ Aura อยู่ในรูป `neo4j+s://...databases.neo4j.io`
 4. อย่านำ password ไปใส่ในไฟล์ที่ commit ขึ้น GitHub
 
 ## 4. รันในเครื่อง
@@ -65,13 +83,16 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-คัดลอกไฟล์ตัวอย่าง secrets
+ใส่ credential ในไฟล์ `.streamlit/secrets.toml` (ถ้ายังไม่มีให้คัดลอกจาก `secrets.toml.example`)
 
-```bash
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+```toml
+[neo4j]
+uri = "neo4j+s://YOUR_INSTANCE.databases.neo4j.io"
+username = "YOUR_USERNAME"
+password = "YOUR_PASSWORD"
 ```
 
-จากนั้นใส่ credential จริง แล้วรัน
+ไม่ต้องใส่ `database` ก็ได้ ระบบจะถาม `SHOW HOME DATABASE` แล้วใช้ค่านั้นให้เอง จากนั้นรัน
 
 ```bash
 streamlit run app.py
@@ -79,55 +100,49 @@ streamlit run app.py
 
 ## 5. ครั้งแรกที่เปิดระบบ
 
-1. เข้าเมนู **Admin / Setup**
-2. กด **สร้าง Constraint + Demo Data**
-3. ระบบใช้ `MERGE` จึงกดซ้ำได้โดยไม่สร้าง node ซ้ำจาก key เดิม
-4. จากนั้นทดลอง Dashboard, Recommendations, Search, Borrow/Rate และ Graph Explorer
+1. จากหน้า Hub กด **เข้าสู่ระบบแนะนำ** แล้วเข้าเมนู **ตั้งค่าข้อมูล**
+2. กด **สร้าง Constraint + Demo Data** จะได้ผู้ใช้ 10 คน เหรียญ 8 เหรียญ และ `HOLDS` 26 เส้นตาม Notebook
+3. ระบบใช้ `MERGE` จึงกดซ้ำได้โดยไม่สร้าง node ซ้ำ
+4. จากนั้นทดลองเมนู แนะนำเหรียญ และ กราฟความสัมพันธ์
 
-## 6. Deploy GitHub → Streamlit Community Cloud
+## 6. การเพิ่ม ลบ แก้ไขข้อมูล
 
-1. สร้าง GitHub repository ใหม่
-2. push ไฟล์ทั้งหมดขึ้น GitHub **ยกเว้น `.streamlit/secrets.toml`**
-3. เข้า Streamlit Community Cloud แล้วเลือก Create app
-4. เลือก repository, branch และ entrypoint = `app.py`
-5. ใน Advanced settings → Secrets ใส่
+| เมนู | ทำอะไรได้ |
+|---|---|
+| จัดการคน & เพื่อน | เพิ่มผู้ใช้ (พร้อมเหรียญที่ถือ) เปลี่ยนชื่อ และลบ รวมถึงดู `FRIEND_OF` และสั่งคำนวณใหม่ |
+| จัดการเหรียญ & การถือ | เพิ่ม แก้ไขสัญลักษณ์และหมวด (`IN_CATEGORY`) ลบเหรียญ แก้ไขพอร์ตทั้งชุด เพิ่มหรือลบ `HOLDS` ทีละเส้น และเพิ่ม เปลี่ยนชื่อ ลบหมวดหมู่ |
+| ตั้งค่าข้อมูล | สร้างข้อมูลตัวอย่าง และล้างข้อมูล User / Coin / Category ทั้งหมด |
 
-```toml
-[neo4j]
-uri = "neo4j+s://YOUR_INSTANCE.databases.neo4j.io"
-username = "neo4j"
-password = "YOUR_PASSWORD"
-database = "neo4j"
-```
+ทุกการแก้ไขที่กระทบ `HOLDS` จะรันในทรานแซกชันเดียวกับการสร้าง `FRIEND_OF` ใหม่ ข้อมูลจึงตรงกันเสมอ
+ถ้าแก้ข้อมูลจากนอกแอป เช่น Notebook หรือ Aura Query ให้กดปุ่ม **คำนวณ FRIEND_OF ใหม่จาก HOLDS** ในแท็บ `FRIEND_OF`
 
-6. Deploy
+## 7. Deploy GitHub → Streamlit Community Cloud
 
-## 7. ประเด็น Graph Database ที่นักศึกษาจะได้ฝึก
+1. push ไฟล์ทั้งหมดขึ้น GitHub **ยกเว้น `.streamlit/secrets.toml`** (อยู่ใน `.gitignore` แล้ว)
+2. เข้า Streamlit Community Cloud แล้วเลือก Create app
+3. เลือก repository, branch และ entrypoint = `app.py`
+4. ใน Advanced settings → Secrets ใส่ค่า `[neo4j]` แบบเดียวกับข้อ 4
+5. Deploy
+
+## 8. ประเด็น Graph Database ที่นักศึกษาจะได้ฝึก
 
 - Node, Label, Property
-- Relationship และ Direction
+- Relationship และ Direction รวมถึงการเดินย้อนทิศ `<-[:HOLDS]-` และไม่สนทิศ `-[:FRIEND_OF]-`
 - Constraint และ Unique Key
-- `MATCH`, `MERGE`, `OPTIONAL MATCH`, `WITH`, `UNWIND`
-- Graph traversal ผ่านเพื่อน → หนังสือ
-- Aggregation เช่น `count`, `avg`, `collect`
-- Recommendation จาก topology ของกราฟ
+- `MATCH`, `MERGE`, `CREATE`, `SET`, `DELETE`, `DETACH DELETE`, `OPTIONAL MATCH`, `WITH`, `UNWIND`
+- Graph traversal 2 hop และ 3 hop
+- Aggregation เช่น `count`, `sum`, `collect`
+- Relationship ที่คำนวณจากข้อมูลอื่น (derived relationship) และการรักษาให้ตรงกับต้นทาง
 - Parameterized Cypher
-- Python Driver และ connection pooling
-- Streamlit UI
-- Secrets และ cloud deployment
+- Python Driver, connection pooling และ transaction function
+- Streamlit UI, Secrets และ cloud deployment
 
-## 8. สิ่งที่ปรับปรุงจาก notebook ต้นแบบ
+## 9. สิ่งที่ปรับจาก Notebook ต้นแบบ
 
-- ใช้ label `Student` ให้สอดคล้องทั้งระบบ แทนการปะปน `Student2`/`Student`
-- ใช้ `MERGE` ใน seed data เพื่อรองรับการรันซ้ำ
-- เพิ่ม Unique Constraints
-- ใช้ parameterized Cypher แทนการต่อ string จาก input
-- มอง `FRIEND_OF` เป็นความสัมพันธ์เชิงสมมาตรตอน query ด้วย `-[:FRIEND_OF]-`
-- เพิ่ม Author, Category และ Interest เพื่อให้ recommendation มีมิติด้าน content
-- เพิ่ม rating และ popularity เพื่อสร้าง Hybrid Score
 - แยก database layer (`neo4j_service.py`) ออกจาก UI (`app.py`)
-- ใช้ Streamlit Secrets แทนการ hardcode Aura credential
-
-## 9. แนวทางต่อยอดเป็นโครงงานนักศึกษา
-
-สามารถเพิ่ม Login, Favorite/Wishlist, การคืนหนังสือ, due date, collaborative filtering, Graph Data Science similarity, PageRank, community detection, evaluation metrics เช่น Precision@K/Recall@K และระบบผู้ดูแลได้
+- ใช้ Streamlit Secrets แทนการพิมพ์ password ผ่าน `getpass`
+- เพิ่ม ลบ แก้ไข User, Coin, Category และความสัมพันธ์ได้จากหน้าเว็บ
+- สร้าง `FRIEND_OF` ใหม่อัตโนมัติในทรานแซกชันเดียวกับการแก้ `HOLDS`
+- เรียง `shared_coins` ตามตัวอักษรเพื่อให้ผลลัพธ์คงที่
+- คำแนะนำบอกเหตุผลได้ เช่น เดินผ่านผู้ใช้คนใด เพื่อนคนไหนถืออยู่ หรืออยู่หมวดใด
+- วาดกราฟด้วย Graphviz ในหน้า กราฟความสัมพันธ์ แทน NetworkX + matplotlib

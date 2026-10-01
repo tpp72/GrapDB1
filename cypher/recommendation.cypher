@@ -1,48 +1,33 @@
-// Explainable Hybrid Book Recommendation
-// Parameters: $student_id, $limit
-MATCH (u:Student {student_id:$student_id})
-MATCH (b:Book)
-WHERE NOT (u)-[:BORROWED]->(b)
+// Crypto Coin Recommendation
+// Parameters: $name, $limit
 
-// 1) Social signal: books borrowed by friends
-OPTIONAL MATCH (u)-[:FRIEND_OF]-(f:Student)-[:BORROWED]->(b)
-WITH u, b,
-     count(DISTINCT f) AS friend_count,
-     [x IN collect(DISTINCT f.name) WHERE x IS NOT NULL][0..3] AS friend_names
+// 1) 3 hops through HOLDS: me -> my coins -> users holding the same coins -> new coins
+//    score = number of paths that reach the coin
+MATCH (me:User {name: $name})-[:HOLDS]->(:Coin)<-[:HOLDS]-(other:User)-[:HOLDS]->(rec:Coin)
+WHERE other <> me
+  AND NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
+RETURN rec.symbol AS coin,
+       count(*) AS score,
+       collect(DISTINCT other.name) AS via_users
+ORDER BY score DESC, coin
+LIMIT $limit;
 
-// 2) Content signal: categories matching the user's interests
-OPTIONAL MATCH (u)-[:INTERESTED_IN]->(c:Category)<-[:IN_CATEGORY]-(b)
-WITH b, friend_count, friend_names,
-     count(DISTINCT c) AS interest_matches,
-     [x IN collect(DISTINCT c.name) WHERE x IS NOT NULL] AS matched_categories
+// 2) 2 hops through FRIEND_OF: me -> friends -> coins my friends hold
+//    weighted_score = sum of FRIEND_OF.weight, equal to the 3-hop score
+MATCH (me:User {name: $name})-[f:FRIEND_OF]-(friend:User)-[:HOLDS]->(rec:Coin)
+WHERE NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
+RETURN rec.symbol AS coin,
+       count(DISTINCT friend) AS friend_score,
+       sum(f.weight) AS weighted_score,
+       collect(friend.name) AS from_friends
+ORDER BY weighted_score DESC, friend_score DESC, coin
+LIMIT $limit;
 
-// 3) Popularity and rating signal
-OPTIONAL MATCH (:Student)-[br:BORROWED]->(b)
-WITH b, friend_count, friend_names, interest_matches, matched_categories,
-     count(br) AS popularity,
-     coalesce(avg(br.rating), 0.0) AS avg_rating
-
-// 4) Teaching-friendly heuristic score
-WITH b, friend_count, friend_names, interest_matches, matched_categories,
-     popularity, avg_rating,
-     (friend_count * 3.0) +
-     (interest_matches * 2.0) +
-     (popularity * 0.20) +
-     (avg_rating * 0.50) AS score
-WHERE friend_count > 0 OR interest_matches > 0 OR popularity > 0
-
-OPTIONAL MATCH (a:Author)-[:WROTE]->(b)
-OPTIONAL MATCH (b)-[:IN_CATEGORY]->(allc:Category)
-RETURN b.book_id AS book_id,
-       b.title AS title,
-       collect(DISTINCT a.name) AS authors,
-       collect(DISTINCT allc.name) AS categories,
-       friend_count,
-       friend_names,
-       interest_matches,
-       matched_categories,
-       popularity,
-       round(avg_rating * 100) / 100.0 AS avg_rating,
-       round(score * 100) / 100.0 AS score
-ORDER BY score DESC, b.title
+// 3) Cold start: other coins in the categories of the coins I hold
+MATCH (me:User {name: $name})-[:HOLDS]->(:Coin)-[:IN_CATEGORY]->(k:Category)<-[:IN_CATEGORY]-(rec:Coin)
+WHERE NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
+RETURN rec.symbol AS coin,
+       count(*) AS score,
+       collect(DISTINCT k.name) AS categories
+ORDER BY score DESC, coin
 LIMIT $limit;
