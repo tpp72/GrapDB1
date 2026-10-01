@@ -229,7 +229,7 @@ def get_coins() -> list[dict[str, Any]]:
         WITH c, head(collect(k.name)) AS category
         OPTIONAL MATCH (u:User)-[:HOLDS]->(c)
         WITH c, category, u ORDER BY u.name
-        RETURN c.symbol AS symbol, category, collect(u.name) AS holders
+        RETURN c.symbol AS symbol, c.image AS image, category, collect(u.name) AS holders
         ORDER BY symbol
         """
     )
@@ -255,14 +255,26 @@ def _category_steps(symbol: str, category: str | None) -> list[Step]:
     return steps
 
 
-def create_coin(symbol: str, category: str | None = None) -> None:
+def create_coin(symbol: str, category: str | None = None, image: str | None = None) -> None:
+    """`image` is a data URI stored on the node, so uploads survive app restarts."""
     symbol = _clean(symbol, "สัญลักษณ์เหรียญ").upper()
     if _coin_exists(symbol):
         raise ValueError(f"มีเหรียญ {symbol} อยู่แล้ว")
-    _write(("CREATE (:Coin {symbol: $symbol})", {"symbol": symbol}), *_category_steps(symbol, category))
+    # Setting a property to null leaves it unset.
+    _write(
+        ("CREATE (c:Coin {symbol: $symbol}) SET c.image = $image", {"symbol": symbol, "image": image}),
+        *_category_steps(symbol, category),
+    )
 
 
-def update_coin(symbol: str, new_symbol: str, category: str | None) -> None:
+def update_coin(
+    symbol: str,
+    new_symbol: str,
+    category: str | None,
+    image: str | None = None,
+    clear_image: bool = False,
+) -> None:
+    """Rename and recategorize a coin; `image` replaces the stored picture, `clear_image` removes it."""
     new_symbol = _clean(new_symbol, "สัญลักษณ์เหรียญ").upper()
     renamed = new_symbol != symbol
     steps: list[Step] = []
@@ -272,6 +284,10 @@ def update_coin(symbol: str, new_symbol: str, category: str | None) -> None:
         steps.append(
             ("MATCH (c:Coin {symbol: $symbol}) SET c.symbol = $new_symbol", {"symbol": symbol, "new_symbol": new_symbol})
         )
+    if image:
+        steps.append(("MATCH (c:Coin {symbol: $symbol}) SET c.image = $image", {"symbol": new_symbol, "image": image}))
+    elif clear_image:
+        steps.append(("MATCH (c:Coin {symbol: $symbol}) REMOVE c.image", {"symbol": new_symbol}))
     # shared_coins on FRIEND_OF stores symbols, so a rename needs a rebuild.
     _write(*steps, *_category_steps(new_symbol, category), sync_friends=renamed)
 
@@ -331,7 +347,7 @@ def get_user_holdings(name: str) -> list[dict[str, Any]]:
         """
         MATCH (:User {name: $name})-[:HOLDS]->(c:Coin)
         OPTIONAL MATCH (c)-[:IN_CATEGORY]->(k:Category)
-        RETURN c.symbol AS coin, head(collect(k.name)) AS category
+        RETURN c.symbol AS coin, c.image AS image, head(collect(k.name)) AS category
         ORDER BY coin
         """,
         {"name": name},
@@ -429,7 +445,7 @@ def recommend_coins(name: str, limit: int = 5) -> list[dict[str, Any]]:
         MATCH (me:User {name: $name})-[:HOLDS]->(:Coin)<-[:HOLDS]-(other:User)-[:HOLDS]->(rec:Coin)
         WHERE other <> me
           AND NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
-        RETURN rec.symbol AS coin, count(*) AS score, collect(DISTINCT other.name) AS via_users
+        RETURN rec.symbol AS coin, rec.image AS image, count(*) AS score, collect(DISTINCT other.name) AS via_users
         ORDER BY score DESC, coin
         LIMIT $limit
         """,
@@ -444,6 +460,7 @@ def recommend_by_friends(name: str, limit: int = 5) -> list[dict[str, Any]]:
         MATCH (me:User {name: $name})-[f:FRIEND_OF]-(friend:User)-[:HOLDS]->(rec:Coin)
         WHERE NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
         RETURN rec.symbol AS coin,
+               rec.image AS image,
                count(DISTINCT friend) AS friend_score,
                sum(f.weight) AS weighted_score,
                collect(friend.name) AS from_friends
@@ -460,7 +477,7 @@ def recommend_by_category(name: str, limit: int = 5) -> list[dict[str, Any]]:
         """
         MATCH (me:User {name: $name})-[:HOLDS]->(:Coin)-[:IN_CATEGORY]->(k:Category)<-[:IN_CATEGORY]-(rec:Coin)
         WHERE NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
-        RETURN rec.symbol AS coin, count(*) AS score, collect(DISTINCT k.name) AS categories
+        RETURN rec.symbol AS coin, rec.image AS image, count(*) AS score, collect(DISTINCT k.name) AS categories
         ORDER BY score DESC, coin
         LIMIT $limit
         """,

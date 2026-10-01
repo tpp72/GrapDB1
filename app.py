@@ -1,43 +1,49 @@
 from __future__ import annotations
 
+import base64
+import zlib
 from html import escape
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
 from neo4j.exceptions import Neo4jError
+from PIL import Image, UnidentifiedImageError
 
 import neo4j_service as db
 
-IMAGE_PATH = Path(__file__).parent / "images" / "Tae.png"
+COIN_IMAGE_DIR = Path(__file__).parent / "images" / "coins"
+COIN_IMAGE_SIZE = 128
+COIN_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
 HOMEWORK_DIR = Path(__file__).parent / "homework"
 REPO_URL = "https://github.com/tpp72/GrapDB1"
 BRANCH = "main"
 COLAB_URL = f"https://colab.research.google.com/github/tpp72/GrapDB1/blob/{BRANCH}"
-OWNER_NAME = "Topong P."
+OWNER_NAME = "ต่อพงศ์ เพียรพัฒน์กุล"
 OWNER_ID = "664245010"
 # Cards 1-3 list the files found in homework/<folder>; the card without a folder opens this app.
 HUB_CARDS = [
     {
-        "tag": "01 / CLUB",
-        "icon": "👥",
-        "title": "ระบบชมรมด้วย Neo4j",
-        "desc": "งานระบบชมรม: นักศึกษา ชมรม ความสัมพันธ์ และคำสั่ง Cypher พร้อมเอกสาร PDF",
+        "tag": "01 / CYPHER",
+        "icon": "📚",
+        "title": "แนะนำหนังสือและชมรมด้วย Neo4j",
+        "desc": "เอกสาร PDF งาน Neo4j และ Graph Database: แนะนำหนังสือจากเพื่อนด้วย Traversal 1–2 hop และแนะนำชมรมจาก FRIEND_OF กับ MEMBER_OF",
         "folder": "01_club",
     },
     {
         "tag": "02 / GRAPH",
         "icon": "🕸️",
-        "title": "Crypto ด้วย Graph",
-        "desc": "สร้างกราฟผู้ใช้และเหรียญ Crypto ด้วย Python / NetworkX เพื่อสำรวจพอร์ตที่คล้ายกันและแนวทางแนะนำ",
+        "title": "Crypto Recommender ด้วย NetworkX",
+        "desc": "สร้างกราฟผู้ใช้ 10 คนกับเหรียญ 8 เหรียญด้วย Python / NetworkX แล้วแนะนำเหรียญด้วยการเดินกราฟ 3 hop และหมวดหมู่สำหรับ Cold Start",
         "folder": "02_graph",
     },
     {
         "tag": "03 / NEO4J",
         "icon": "🔗",
-        "title": "Crypto ด้วย Neo4j",
-        "desc": "วิเคราะห์ความสัมพันธ์และแนะนำเหรียญ Crypto ด้วย Neo4j จากไฟล์การบ้าน CryptoRecommender",
+        "title": "Crypto Recommender ด้วย Neo4j",
+        "desc": "ย้ายข้อมูลชุดเดียวกันขึ้น Neo4j Aura เดินกราฟด้วย Cypher สร้าง FRIEND_OF จาก HOLDS และแนะนำเหรียญ 3 แบบ",
         "folder": "03_neo4j",
     },
     {
@@ -78,6 +84,9 @@ st.markdown(
         background:#b45309; color:white; font-size:.8rem; font-weight:700;
       }
       .muted {opacity:.72; font-size:.9rem;}
+      .coin-head {display:flex; align-items:center; gap:.7rem; margin:.55rem 0 .2rem 0;}
+      .coin-head h3 {margin:0; padding:0;}
+      .coin-head img, .coin-preview {width:44px; height:44px; border-radius:50%; object-fit:cover;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -141,12 +150,78 @@ def category_options(categories: list[dict]) -> list[str]:
     return [NO_CATEGORY] + [k["name"] for k in categories]
 
 
-def coin_card(rank: int, coin: str, score: str, reason: str) -> None:
+def data_uri(content: bytes, mime: str) -> str:
+    return f"data:{mime};base64,{base64.b64encode(content).decode()}"
+
+
+@st.cache_data(show_spinner=False)
+def default_coin_image(symbol: str) -> str:
+    """Bundled icon from images/coins, or a generated badge carrying the symbol."""
+    path = COIN_IMAGE_DIR / f"{symbol}.png"
+    if symbol.isalnum() and path.is_file():
+        return data_uri(path.read_bytes(), "image/png")
+    label = symbol[:4]
+    hue = zlib.crc32(symbol.encode()) % 360
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">'
+        f'<circle cx="64" cy="64" r="64" fill="hsl({hue}, 55%, 50%)"/>'
+        '<text x="64" y="64" dy=".35em" text-anchor="middle" font-family="sans-serif" font-weight="700" '
+        f'font-size="{44 if len(label) <= 3 else 34}" fill="white">{escape(label)}</text>'
+        "</svg>"
+    )
+    return data_uri(svg.encode(), "image/svg+xml")
+
+
+def coin_image(symbol: str, image: str | None) -> str:
+    """Uploaded picture stored in Neo4j first, then the bundled or generated default."""
+    return image or default_coin_image(symbol)
+
+
+def encode_upload(upload) -> str | None:
+    """Shrink an uploaded picture to a small PNG data URI that fits in a node property."""
+    if upload is None:
+        return None
+    try:
+        image = Image.open(upload).convert("RGBA")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("ไฟล์รูปไม่ถูกต้อง กรุณาใช้ไฟล์ PNG, JPG หรือ WEBP") from exc
+    image.thumbnail((COIN_IMAGE_SIZE, COIN_IMAGE_SIZE))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return data_uri(buffer.getvalue(), "image/png")
+
+
+def create_coin(symbol: str, category: str | None, upload) -> None:
+    db.create_coin(symbol, category, encode_upload(upload))
+
+
+def update_coin(symbol: str, new_symbol: str, category: str | None, upload, clear_image: bool) -> None:
+    db.update_coin(symbol, new_symbol, category, encode_upload(upload), clear_image)
+
+
+def show_coin_table(rows: list[dict], symbol_key: str, empty: str) -> None:
+    """Like show_table, with each coin's picture in the first column."""
+    if not rows:
+        st.info(empty)
+        return
+    rows = [
+        {"image": coin_image(r[symbol_key], r["image"]), **{k: v for k, v in r.items() if k != "image"}}
+        for r in rows
+    ]
+    st.dataframe(
+        pd.DataFrame(rows),
+        hide_index=True,
+        row_height=44,
+        column_config={"image": st.column_config.ImageColumn("รูป", width="small")},
+    )
+
+
+def coin_card(rank: int, row: dict, score: str, reason: str) -> None:
     st.markdown(
         f"""
         <div class="coin-card">
           <span class="score-pill">#{rank} · {escape(score)}</span>
-          <h3 style="margin:.55rem 0 .2rem 0">{escape(coin)}</h3>
+          <div class="coin-head"><img src="{coin_image(row['coin'], row['image'])}" alt=""><h3>{escape(row['coin'])}</h3></div>
           <div class="muted"><b>เหตุผล:</b> {escape(reason)}</div>
         </div>
         """,
@@ -207,7 +282,7 @@ def page_recommendations() -> None:
     left, right = st.columns([1, 2])
     with left:
         st.markdown("**พอร์ตที่ถือ**")
-        show_table(db.get_user_holdings(name), "ผู้ใช้นี้ยังไม่ถือเหรียญใด")
+        show_coin_table(db.get_user_holdings(name), "coin", "ผู้ใช้นี้ยังไม่ถือเหรียญใด")
     with right:
         st.markdown("**เพื่อน (ถือเหรียญเดียวกัน)**")
         show_table(db.get_friends(name), "ยังไม่มีใครถือเหรียญซ้ำกับผู้ใช้นี้")
@@ -220,7 +295,7 @@ def page_recommendations() -> None:
             st.info("ยังไม่มีคำแนะนำสำหรับผู้ใช้นี้")
         for i, row in enumerate(rows, start=1):
             via = ", ".join(row["via_users"])
-            coin_card(i, row["coin"], f"score {row['score']}", f"เดินไปถึงได้ {row['score']} เส้นทาง ผ่าน {via}")
+            coin_card(i, row, f"score {row['score']}", f"เดินไปถึงได้ {row['score']} เส้นทาง ผ่าน {via}")
     with friends:
         st.caption("ผู้ใช้ → เพื่อน → เหรียญที่เพื่อนถือ · weighted score = ผลรวม weight ของเพื่อน (เท่ากับคะแนนแบบ 3 hop)")
         rows = db.recommend_by_friends(name, top_n)
@@ -230,7 +305,7 @@ def page_recommendations() -> None:
             names = ", ".join(row["from_friends"])
             coin_card(
                 i,
-                row["coin"],
+                row,
                 f"weighted {row['weighted_score']}",
                 f"เพื่อน {row['friend_score']} คนถืออยู่ ({names})",
             )
@@ -241,7 +316,7 @@ def page_recommendations() -> None:
             st.info("ไม่มีเหรียญอื่นในหมวดเดียวกับที่ผู้ใช้นี้ถืออยู่")
         for i, row in enumerate(rows, start=1):
             cats = ", ".join(row["categories"])
-            coin_card(i, row["coin"], f"score {row['score']}", f"อยู่หมวดเดียวกับเหรียญที่ถืออยู่ ({cats})")
+            coin_card(i, row, f"score {row['score']}", f"อยู่หมวดเดียวกับเหรียญที่ถืออยู่ ({cats})")
 
 
 def users_section() -> None:
@@ -360,18 +435,26 @@ def page_coins() -> None:
             st.markdown("**เพิ่มเหรียญ**")
             symbol = st.text_input("สัญลักษณ์ (เช่น BTC)")
             category = st.selectbox("หมวดหมู่", options)
+            upload = st.file_uploader("รูปเหรียญ (ไม่บังคับ)", type=COIN_IMAGE_TYPES)
             if st.form_submit_button("เพิ่ม", type="primary"):
                 run_action(
                     f"เพิ่มเหรียญ {symbol.strip().upper()} แล้ว",
-                    db.create_coin,
+                    create_coin,
                     symbol,
                     None if category == NO_CATEGORY else category,
+                    upload,
                 )
         with edit, st.container(border=True):
             st.markdown("**แก้ไขเหรียญ**")
             if coins:
                 current = {c["symbol"]: c["category"] or NO_CATEGORY for c in coins}
+                images = {c["symbol"]: c["image"] for c in coins}
                 target = st.selectbox("เหรียญ", list(current), key="edit_coin")
+                stored = images[target]
+                st.markdown(
+                    f'<img class="coin-preview" src="{coin_image(target, stored)}" alt="">',
+                    unsafe_allow_html=True,
+                )
                 new_symbol = st.text_input("สัญลักษณ์", value=target, key=f"edit_coin_symbol_{target}")
                 category = st.selectbox(
                     "หมวดหมู่",
@@ -379,13 +462,26 @@ def page_coins() -> None:
                     index=options.index(current[target]),
                     key=f"edit_coin_category_{target}_{current[target]}",
                 )
+                # The key carries the stored picture so the uploader empties once a new one is saved.
+                tag = zlib.crc32((stored or "").encode())
+                upload = st.file_uploader(
+                    "เปลี่ยนรูปเหรียญ",
+                    type=COIN_IMAGE_TYPES,
+                    key=f"edit_coin_image_{target}_{tag}",
+                )
+                clear_image = bool(stored) and st.checkbox(
+                    "ลบรูปที่อัปโหลดไว้ (กลับไปใช้รูปเริ่มต้น)",
+                    key=f"edit_coin_clear_{target}_{tag}",
+                )
                 if st.button("บันทึก", key="edit_coin_save"):
                     run_action(
                         f"แก้ไขเหรียญ {target} แล้ว",
-                        db.update_coin,
+                        update_coin,
                         target,
                         new_symbol,
                         None if category == NO_CATEGORY else category,
+                        upload,
+                        clear_image,
                     )
             else:
                 st.caption("ยังไม่มีเหรียญ")
@@ -399,7 +495,7 @@ def page_coins() -> None:
             else:
                 st.caption("ยังไม่มีเหรียญ")
         st.divider()
-        show_table(coins, "ยังไม่มีเหรียญ")
+        show_coin_table(coins, "symbol", "ยังไม่มีเหรียญ")
 
     with category_tab:
         names = [k["name"] for k in categories]
@@ -478,11 +574,6 @@ def page_admin() -> None:
         run_action("ล้างข้อมูลเรียบร้อยแล้ว", db.clear_data)
 
 
-def page_image() -> None:
-    st.subheader("🖼️ รูปภาพ")
-    st.image(str(IMAGE_PATH))
-
-
 PAGES = {
     "🪙 แนะนำเหรียญ": page_recommendations,
     "👥 จัดการคน & เพื่อน": page_people,
@@ -490,8 +581,6 @@ PAGES = {
     "🕸️ กราฟความสัมพันธ์": page_graph,
     "⚙️ ตั้งค่าข้อมูล": page_admin,
 }
-if IMAGE_PATH.exists():
-    PAGES["รูปภาพ"] = page_image
 
 
 def open_app() -> None:
@@ -587,7 +676,7 @@ def render_hub() -> None:
         <div class="hub-head">
           <span class="hub-badge">HOMEWORK · RECOMMENDATION HUB</span>
           <div class="hub-title">รวมการบ้านและระบบแนะนำ</div>
-          <div class="hub-sub">ระบบชมรม · กราฟ Crypto · Neo4j<br>เลือกงานที่ต้องการเปิดดูได้จากการ์ดด้านล่าง</div>
+          <div class="hub-sub">หนังสือและชมรม · กราฟ Crypto · Neo4j<br>เลือกงานที่ต้องการเปิดดูได้จากการ์ดด้านล่าง</div>
         </div>
         """,
         unsafe_allow_html=True,

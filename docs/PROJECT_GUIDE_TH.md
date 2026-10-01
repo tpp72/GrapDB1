@@ -51,11 +51,11 @@ graph LR
 
 ### Node
 
-| Label | Primary property | หน้าที่ |
-|---|---|---|
-| User | name | ผู้ใช้ระบบ |
-| Coin | symbol | เหรียญ Crypto |
-| Category | name | หมวดของเหรียญ เช่น Layer1, Exchange, Payment, Meme |
+| Label | Primary property | Property อื่น | หน้าที่ |
+|---|---|---|---|
+| User | name | - | ผู้ใช้ระบบ |
+| Coin | symbol | image (ไม่บังคับ) | เหรียญ Crypto และรูปที่อัปโหลด เก็บเป็น data URI ขนาดไม่เกิน 128 px |
+| Category | name | - | หมวดของเหรียญ เช่น Layer1, Exchange, Payment, Meme |
 
 ### Relationship
 
