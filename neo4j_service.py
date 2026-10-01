@@ -442,10 +442,12 @@ def recommend_coins(name: str, limit: int = 5) -> list[dict[str, Any]]:
     """3 hops: me -> coins I hold -> users holding the same coins -> coins I do not hold yet."""
     return query(
         """
-        MATCH (me:User {name: $name})-[:HOLDS]->(:Coin)<-[:HOLDS]-(other:User)-[:HOLDS]->(rec:Coin)
+        MATCH (me:User {name: $name})-[:HOLDS]->(via:Coin)<-[:HOLDS]-(other:User)-[:HOLDS]->(rec:Coin)
         WHERE other <> me
           AND NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
-        RETURN rec.symbol AS coin, rec.image AS image, count(*) AS score, collect(DISTINCT other.name) AS via_users
+        WITH rec, via, other ORDER BY via.symbol, other.name
+        RETURN rec.symbol AS coin, rec.image AS image, count(*) AS score,
+               collect({coin: via.symbol, user: other.name}) AS paths
         ORDER BY score DESC, coin
         LIMIT $limit
         """,
@@ -459,11 +461,12 @@ def recommend_by_friends(name: str, limit: int = 5) -> list[dict[str, Any]]:
         """
         MATCH (me:User {name: $name})-[f:FRIEND_OF]-(friend:User)-[:HOLDS]->(rec:Coin)
         WHERE NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
+        WITH rec, friend, f ORDER BY f.weight DESC, friend.name
         RETURN rec.symbol AS coin,
                rec.image AS image,
                count(DISTINCT friend) AS friend_score,
                sum(f.weight) AS weighted_score,
-               collect(friend.name) AS from_friends
+               collect({user: friend.name, weight: f.weight}) AS paths
         ORDER BY weighted_score DESC, friend_score DESC, coin
         LIMIT $limit
         """,
@@ -475,9 +478,11 @@ def recommend_by_category(name: str, limit: int = 5) -> list[dict[str, Any]]:
     """Cold-start fallback: other coins in the categories of the coins I hold."""
     return query(
         """
-        MATCH (me:User {name: $name})-[:HOLDS]->(:Coin)-[:IN_CATEGORY]->(k:Category)<-[:IN_CATEGORY]-(rec:Coin)
+        MATCH (me:User {name: $name})-[:HOLDS]->(via:Coin)-[:IN_CATEGORY]->(k:Category)<-[:IN_CATEGORY]-(rec:Coin)
         WHERE NOT EXISTS { MATCH (me)-[:HOLDS]->(rec) }
-        RETURN rec.symbol AS coin, rec.image AS image, count(*) AS score, collect(DISTINCT k.name) AS categories
+        WITH rec, via, k ORDER BY via.symbol, k.name
+        RETURN rec.symbol AS coin, rec.image AS image, count(*) AS score,
+               collect({coin: via.symbol, category: k.name}) AS paths
         ORDER BY score DESC, coin
         LIMIT $limit
         """,
