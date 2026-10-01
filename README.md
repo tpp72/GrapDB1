@@ -1,4 +1,6 @@
-# Crypto Coin Recommender (Graph Database)
+# Homework Hub
+
+รวมการบ้านวิชา Graph Database 4 ชิ้น โดยชิ้นที่ 4 คือระบบแนะนำเหรียญ Crypto (Crypto Coin Recommender) ซึ่งเป็นเนื้อหาหลักของเอกสารนี้
 
 โปรเจ็คตัวอย่างระดับปริญญาตรีสำหรับรายวิชา Graph Database / Advanced Database
 พัฒนาด้วย **Streamlit + Neo4j Aura + Cypher** และออกแบบให้ deploy ผ่าน **GitHub → Streamlit Community Cloud** ได้โดยตรง
@@ -31,7 +33,7 @@
 ## 2. โครงสร้างไฟล์
 
 ```text
-GrapDB1/
+Homework-Hub/
 ├── app.py                  # หน้าจอ Streamlit
 ├── neo4j_service.py        # ชั้นเชื่อมต่อฐานข้อมูลและ Cypher ทั้งหมด
 ├── requirements.txt

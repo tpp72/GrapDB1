@@ -18,9 +18,10 @@ COIN_IMAGE_DIR = Path(__file__).parent / "images" / "coins"
 COIN_IMAGE_SIZE = 128
 COIN_IMAGE_TYPES = ["png", "jpg", "jpeg", "webp"]
 HOMEWORK_DIR = Path(__file__).parent / "homework"
-REPO_URL = "https://github.com/tpp72/GrapDB1"
+REPO = "tpp72/Homework-Hub"
 BRANCH = "main"
-COLAB_URL = f"https://colab.research.google.com/github/tpp72/GrapDB1/blob/{BRANCH}"
+REPO_URL = f"https://github.com/{REPO}"
+COLAB_URL = f"https://colab.research.google.com/github/{REPO}/blob/{BRANCH}"
 OWNER_NAME = "ต่อพงศ์ เพียรพัฒน์กุล"
 OWNER_ID = "664245010"
 # Stops 1-3 list the files found in homework/<folder>; the stop without a folder opens this app.
